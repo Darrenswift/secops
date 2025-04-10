@@ -1,0 +1,62 @@
+# bitbucket-pipelines.yml
+# Pipeline to deploy Chronicle detection rules using the v2 API Python script that fetches rules directly from the Bitbucket API.
+
+# Assumes the following Bitbucket Repository Variables are configured:
+#   - GCP_SERVICE_ACCOUNT_KEY (Secured): JSON key for GCP authentication.
+#   - CHRONICLE_REGION: Your Chronicle instance region (e.g., 'us').
+#   - BITBUCKET_WORKSPACE: Your Bitbucket workspace ID/slug.
+#   - BITBUCKET_REPO_SLUG: Your Bitbucket repository slug.
+#   - BITBUCKET_ACCESS_TOKEN (Secured): Bitbucket App Password or Access Token with repo:read scope.
+# Optional Variables (defaults are used if not set):
+#   - BITBUCKET_BRANCH_OR_COMMIT: Branch/commit to fetch from (default: 'main').
+#   - RULES_DIR: Directory containing rules within the repo (default: 'rules').
+
+image: google/cloud-sdk:alpine # Includes gcloud SDK and python
+
+pipelines:
+  default: # Or specify branches: - main / - master
+    - step:
+        name: Fetch Rules from Bitbucket & Deploy to Chronicle (v2 API)
+        script:
+          # --- Google Cloud Authentication (for Chronicle API) ---
+          - echo "Authenticating to Google Cloud..."
+          # 1. Write the GCP Service Account Key from the Bitbucket variable to a temporary file.
+          - echo $GCP_SERVICE_ACCOUNT_KEY > /tmp/gcp-key.json
+          # 2. Activate the service account.
+          - gcloud auth activate-service-account --key-file=/tmp/gcp-key.json
+          # 3. Generate the Chronicle access token, explicitly requesting the required scope.
+          - export CHRONICLE_ACCESS_TOKEN=$(gcloud auth print-access-token --scopes=https://www.googleapis.com/auth/chronicle-backstory)
+          # 4. Remove the temporary key file.
+          - rm /tmp/gcp-key.json
+          - echo "GCP Authentication successful. Chronicle token generated with required scope."
+
+          # --- Export Required Environment Variables for the Script ---
+          - echo "Exporting environment variables..."
+          # Chronicle variables (Only Region is needed now by the script for URL)
+          - export CHRONICLE_REGION=$CHRONICLE_REGION
+
+          # Bitbucket variables
+          - export BITBUCKET_WORKSPACE=$BITBUCKET_WORKSPACE
+          - export BITBUCKET_REPO_SLUG=$BITBUCKET_REPO_SLUG
+          - export BITBUCKET_ACCESS_TOKEN=$BITBUCKET_ACCESS_TOKEN # Export the secured token
+
+          # Optional Bitbucket variables with defaults
+          - export BITBUCKET_BRANCH_OR_COMMIT=${BITBUCKET_BRANCH_OR_COMMIT:-main}
+          - export RULES_DIR=${RULES_DIR:-rules}
+
+          # --- Install Python Dependencies ---
+          - echo "Installing Python dependencies using apk..."
+          # Install requests using Alpine package manager directly
+          - apk update && apk add --no-cache py3-requests
+
+          # --- Execute the Deployment Script ---
+          - echo "Running Chronicle rule deployment script..."
+          # Assumes your script is named 'deploy_chronicle_rules.py'
+          - python3 deploy_chronicle_rules.py
+
+          # --- Pipeline Step Finished ---
+          - echo "Pipeline step completed."
+
+        # Optional: Define services if your script needs them
+        # services:
+        #   - docker
